@@ -1,0 +1,510 @@
+---
+title: "Medical Insurance Charges Analysis"
+subtitle: "Understanding Demographics and Smoking behaviours with Statistical Analysis"
+author: "Jialun Darren Huang"
+output:
+  slidy_presentation: 
+    font_adjustment: 0
+    highlight: haddock
+    mathjax: "default"
+    df_print: paged
+    includes:
+      in_header: header.html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	message = FALSE,
+	warning = FALSE
+)
+
+#
+library(dplyr) # For data manipulation
+library(tidyr) # For reshaping data
+library(car) # For checking assumptions in two sampled t-test
+library(ggplot2) # For creating plots
+library(patchwork) # For combining plots side by side
+library(knitr) # Useful for creating nice tables
+library(kableExtra) # Editing nice kable tables
+```
+
+# Introduction
+
+- Medical insurance helps individuals manage financial burden of healthcare expenses
+- Insurance charges can differ with individual demographics and lifestyle characteristics.
+- Understanding these differences can help us gain insights to:
+  - What are some factors that associate to higher medical insurance costs
+  - Insurers and policymakers: Design a fairer, unbiased, and more data driven insurance pricing model
+  - Individuals with medical insurance: How their own lifestyle can impact medical and their insurance costs, so they can choose better lifestyle choices
+  
+# Problem Statement
+
+- This presentation investigates whether smoking behaviour is associated with demographic factors and higher medical insurance charges
+
+- Specifically, we look into:
+  - Whether Sex and region are associated with smoking status
+  - Whether smokers have a higher medical insurance charges, compared to non-smokers
+
+- These relationships would be analysed using
+  - Categorical association with Chi-square tests
+  - Hypothesis testing, comparing differences in medical insurance charges between groups
+  
+# Data
+
+```{r include = FALSE}
+ori_df <- read.csv("insurance.csv")
+df <- ori_df[, c("smoker", "sex", "region", "charges")]
+```
+
+```{r include = FALSE}
+df$smoker <- factor(df$smoker, 
+                    levels = c("no", "yes"))
+df$sex <- factor(df$sex, 
+                 levels = c("female", "male"))
+df$region <- factor(df$region, 
+                 levels = c("southwest", "southeast", "northwest", "northeast"))
+
+smoker_color_code <- c("no" = "lightgreen", "yes" = "orange2")
+sex_color_code <- c("female" = "lightpink", "male" = "cornflowerblue")
+region_color_code <- c("southwest" = "lightpink", "southeast" = "cornflowerblue",
+                       "northwest" = "lightgreen", "northeast" = "orange2")
+```
+
+- Medical Insurance Cost Dataset from Kaggle by user Mosap Abdel-Ghany (See references). 
+- Dataset contains individual medical insurance records with demographic and lifestyle information
+- No explicit sampling method was said in the data source, however, it could have been sampled (e.g. from a registry or larger population), as the data contains just over 1000 insurance records.
+- Subset of features was selected for the analysis: sex, region, smoker, charges. (See Table 1 for Dataset Description)
+- Conducted preprocessing steps to ensure quality of data and its integrity
+  - Checked for any missing values in the features
+  - Checked for any incorrect or inconsistent values (e.g. no negative values in Medical insurance charges)
+  - Converted categorical features into factor format in R for better interpretability within R
+
+```{r}
+colSums(is.na(df))
+```
+- No missing values in the dataset
+
+# Data
+
+```{r echo = FALSE, tab.cap = "Table 1. Dataset Description"}
+kable(data.frame(
+  "Feature" = c("smoker", "sex", "region", "charges"),
+  "Description" = c(
+    "Smoking Status of the individual",
+    "Sex of the individual",
+    "Region of the individual",
+    "Medical insurance charges of the individual"
+  ),
+  "Data Type and Values" = c(
+    "Nominal Categorical, yes/no",
+    "Nominal Categorical, female/male",
+    "Nominal Categorical, southwest/southeast/northwest/northeast",
+    "Discrete Numerical, Positive Integers"
+  )
+)) %>%
+  kable_styling(
+    full_width = TRUE, 
+    font_size = 16
+  )
+```
+
+```{r}
+summary(df$charges)
+```
+
+- Medical insurance charges do not have any negative values, showing no error in the data
+- Will dive deeper into their distribution in the later slides
+
+# Descriptive Statistics and Visualisation (Categorical Features)
+
+```{r include = FALSE}
+cat_summary_stats <- function(df, cat_feat, color_code) {
+  count_df <- as.data.frame(table(df[[cat_feat]]))
+  names(count_df) <- c(cat_feat, "Count")
+  
+  plot <- ggplot(df, aes(x = .data[[cat_feat]], fill = .data[[cat_feat]])) + 
+    geom_bar(width = .5) +
+    geom_text(
+      data = count_df,
+      aes(x = .data[[cat_feat]], y = Count, label = Count),
+          vjust = -.5, size = 2) +
+    labs(title = paste("Distribution of", cat_feat),
+         x = cat_feat, y = "Count") +
+    scale_fill_manual(values = color_code) +
+    theme(axis.text.x = element_blank(), axis.ticks.y = element_blank(), 
+          plot.title = element_text(hjust = .5))
+  
+  return(plot)
+}
+```
+
+```{r echo = FALSE, fig.cap = "Fig 1. Distribution for Categorical Features", fig.width = 9, fig.height = 3}
+(cat_summary_stats(df, "smoker", smoker_color_code) +
+  plot_spacer() +
+  cat_summary_stats(df, "sex", sex_color_code) +
+  plot_spacer() +
+  cat_summary_stats(df, "region", region_color_code)) +
+  plot_layout(widths = c(1, .05, 1, .05, 1))
+```
+
+- Distribution of sex and region and quite balanced across the different categories
+- More non-smokers than smokers within the dataset
+- Imbalance may reflect a more realistic population behaviour, where smoking is less common due to its known negative health impacts
+
+# Descriptive Statistics and Visualisation (Numerical Features)
+
+```{r echo = FALSE, fig.cap = "Fig 2. Distribution of Medical Insurance Charges", fig.width = 8, fig.height = 2}
+boxplot_charges <- ggplot(df, aes(x = charges, y = "")) + 
+  geom_boxplot(width = .25, fill = "firebrick1", alpha = .5) +
+  labs(x = "charges", y = "") +
+  theme(axis.ticks.y = element_blank(), 
+        plot.title = element_text(hjust = .5))
+
+histogram_charges <- ggplot(df, aes(x = charges)) +
+  geom_histogram(alpha = .5, fill = "firebrick1", position = "identity", bins = 50) +
+  labs(x = "Charges", y = "Count", fill = "Smoker") +
+  theme(axis.ticks.y = element_blank(), 
+        plot.title = element_text(hjust = .5))
+
+(boxplot_charges + plot_spacer() + histogram_charges) +
+  plot_annotation(
+    title = "Distribution of Medical Insurance Charges",
+    theme = theme(plot.title = element_text(hjust = .5))
+  ) +
+  plot_layout(widths = c(1, .05, 1))
+```
+
+```{r echo = FALSE, tab.cap = "Table 2. Descriptive Statistics for Medical Insurance Charges"}
+num_des_stat_tab <- df %>% summarise(
+  Minimum = min(charges, na.rm = TRUE),
+  Q1 = quantile(charges, .25, na.rm = TRUE),
+  Median = median(charges, na.rm = TRUE),
+  Q3 = quantile(charges, .75, na.rm = TRUE),
+  Max = max(charges, na.rm = TRUE),
+  IQR = IQR(charges, na.rm = TRUE),
+  Mean = mean(charges, na.rm = TRUE),
+  SD = sd(charges, na.rm = TRUE)
+)
+
+kable(num_des_stat_tab) %>%
+  kable_styling(
+    full_width = TRUE, 
+    font_size = 16
+  )
+```
+
+- Distribution is very right skewed, with a small percentage of individuals having very high medical insurance charges
+- Majority of individuals have medical insurance charges around 4740 to 16639
+- The standard deviation is larger at 12110 than IQR 11899, meaning that the variability is also affected by high medical insurance charges
+
+# Categorical association (between Region and Sex)
+
+```{r include = FALSE}
+boxplot_comparsion <- function(df, x, y, color_code) {
+  count_df <- as.data.frame(table(df[[x]], df[[y]]))
+  names(count_df) <- c(x, y, "Count")
+  
+  plot <- ggplot(count_df, 
+                 aes(x = .data[[x]], y = Count, 
+                     fill = .data[[y]], group = .data[[y]])) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_text(aes(label = Count),
+              position = position_dodge(width = .8), vjust = -.5, size = 2) +
+    labs(title = paste("Proportion of", y, "by", x),
+         x = x, y = "Count", fill = y) +
+    scale_fill_manual(values = color_code) +
+    theme(axis.ticks.y = element_blank(), 
+          plot.title = element_text(hjust = .5))
+  
+  print(plot)
+}
+```
+
+```{r include = FALSE}
+chi_square_test <- function(df, feature_1, feature_2) {
+  chi2 <- chisq.test(table(df[[feature_1]], df[[feature_2]]))
+  
+  obs <- chi2$observed
+  exp <- round(chi2$expected, 3)
+  
+  chi2_obs_exp_table <- as.data.frame(
+    matrix(
+      paste(obs, " (", exp, ")", sep = ""),
+      nrow = nrow(obs),
+      ncol = ncol(obs),
+      dimnames = list(
+        rownames(obs),
+        colnames(obs)
+      )
+    )
+  )
+  
+  chi2_obs_exp_table <- cbind(
+    setNames(data.frame(rownames(chi2_obs_exp_table)), feature_1),
+    chi2_obs_exp_table
+  )
+  
+  rownames(chi2_obs_exp_table) <- NULL
+  
+  list(
+    table = chi2_obs_exp_table,
+    results = chi2
+  )
+}
+```
+
+- Chi-square test of independence analysis to examine whether there is an association between sex and region, if the distribution of males and females differ across the different regions
+- Identify if the demographic structure is consistent across regions, testing for biases
+- H0: Sex and region are independent (No association)
+- HA: Sex and region are associated
+- Significance level: alpha = 0.05
+
+```{r echo = FALSE, fig.cap = "Fig 3. Proportion of Sex by Region", fig.width = 4, fig.height = 3}
+boxplot_comparsion(df, "region", "sex", sex_color_code)
+```
+
+- Visually, it does not look like there is a difference in sex across regions
+
+# Categorical association (between Region and Sex)
+
+```{r include = FALSE}
+chi2_region_sex <- chi_square_test(df, "region", "sex")
+```
+
+```{r echo = FALSE, tab.cap = "Table 3. Contigency Table of Sex by Region. Observed vs (Expected)"}
+kable(chi2_region_sex$table) %>%
+  kable_styling(
+    full_width = TRUE, 
+    font_size = 16
+  )
+```
+
+```{r echo = FALSE}
+chi2_region_sex$results
+```
+
+- Contingency table:
+  - Met assumptions where no more than 25% of cells have expected counts < 5
+  - showed observed frequencies close to expected frequencies (in brackets)
+- Chi-square test showed p-value = 0.93, which is greater than signifance level at 0.05.
+- Fail to reject null hypothesis, indicating there is no statisitcally significant association between sex and region
+
+# Categorical association (between Smoker Status and Sex)
+
+- Chi-square test of independence analysis to examine whether there is an association between sex and smoking status, if the distribution of males and females differ across the different smoking statuses
+- Determine if smoking behaviour differs between males and females
+- H0: Sex and smoking status are independent (No association)
+- HA: Sex and smoking status are associated
+- Significance level: alpha = 0.05
+
+```{r echo = FALSE, fig.cap = "Fig 4. Proportion of Sex by Smoking Status", fig.width = 4, fig.height = 3}
+boxplot_comparsion(df, "smoker", "sex", sex_color_code)
+```
+
+- Visible difference, where males are more likely to smoke than females
+
+# Categorical association (between Smoker Status and Sex)
+
+```{r include = FALSE}
+chi2_smoker_sex <- chi_square_test(df, "smoker", "sex")
+```
+
+```{r echo = FALSE, tab.cap = "Table 4. Contigency Table of Sex by Smoking Status Observed vs (Expected)"}
+kable(chi2_smoker_sex$table) %>%
+  kable_styling(
+    full_width = TRUE, 
+    font_size = 16
+  )
+```
+
+```{r echo = FALSE}
+chi2_smoker_sex$results
+```
+
+- Contingency table:
+  - Met assumptions where no more than 25% of cells have expected counts < 5
+  - showed observed frequencies are slightly further apart to expected frequencies (in brackets)
+  - Females were observed to smoke less than expected
+  - Male were observed to smoke more than expected
+- Chi-square test showed p-value = 0.006, which is less than significance level at 0.05. Reject null hypothesis, indicating there is a statisitcally significant association between sex and smoking status. Males are more likely to smoke than Females
+
+# Hypothesis Testing (between Medical Insurance Charges and Smoking)
+
+```{r include = FALSE}
+cat_charges_graphs <- function(df, cat_feat, color_code, cat_title) {
+  boxplot_plot <- ggplot(df, aes(x = charges, y = .data[[cat_feat]], 
+                                 fill = .data[[cat_feat]])) + 
+    geom_boxplot(width = .25) +
+    scale_fill_manual(values = color_code) +
+    labs(x = "Charges", y = cat_feat, fill = cat_feat) +
+    theme(legend.position = "none")
+  
+  hist_plot <- ggplot(df, aes(x = charges, fill = .data[[cat_feat]])) +
+    geom_histogram(alpha = .5, position = "identity", bins = 50) +
+    scale_fill_manual(values = color_code) +
+    labs(x = "Charges", y = "Count", fill = cat_feat)
+  
+  (boxplot_plot + plot_spacer() + hist_plot) +
+    plot_annotation(
+      title = paste("Medical insurance charges by", cat_title),
+      theme = theme(plot.title = element_text(hjust = .5))
+    ) +
+    plot_layout(widths = c(1, .05, 1))
+}
+```
+
+- Independent two-sample T-test analysis if medical insurance charges differs between smoking status
+- Identify if smoking is associated with higher medical insurance costs
+- H0: Mean medical insurance charges are equal for all smoking groups
+- HA: Mean medical insurance charges differ between smokers and non-smokers
+- Significance level: alpha = 0.05
+
+```{r echo = FALSE, fig.cap = "Fig 5. Distribution of Medical Insurance Charges by Smoking Status", fig.width = 6, fig.height = 2}
+cat_charges_graphs(df, "smoker", smoker_color_code, "Smoking Status")
+```
+
+- Visible difference, where smokers have a higher medical insurance charge
+
+# Hypothesis Testing (between Medical Insurance Charges and Smoking)
+
+```{r include = FALSE}
+df_smoke <- df %>% filter(smoker == "yes")
+df_non_smoke <- df %>% filter(smoker == "no")
+```
+
+```{r include = FALSE}
+norm_test <- function(df, num_feat, title) {
+  plot <- ggplot(df, aes(sample = .data[[num_feat]])) +
+    stat_qq() + stat_qq_line(color = "red") +
+    labs(title = title,
+         x = "Normal Quantiles", y = "Data Quantiles") +
+    theme(plot.title= element_text(hjust = .5))
+  
+  return(plot)
+}
+```
+
+```{r echo = FALSE, fig.cap = "Fig 6. Normality Test with QQ Plot for Medical Insurance Charges by Smoking Status", fig.width = 6, fig.height = 2}
+(norm_test(df_smoke, "charges", title ="Smokers") + 
+    plot_spacer() + 
+    norm_test(df_non_smoke, "charges", title = "Non-smokers")) +
+  plot_annotation(
+    title = "QQ Plot of Medical insurance charges",
+    theme = theme(plot.title = element_text(hjust = .5))
+  ) +
+  plot_layout(widths = c(1, .05, 1))
+```
+
+```{r echo = FALSE, tab.cap = "Table 5. Homogeneity of Variance Test for Medical Insurance Charges by Smoking Status"}
+kable(leveneTest(charges ~ smoker, data = df), digits = 100) %>%
+  kable_styling(
+    full_width = TRUE, 
+    font_size = 16
+  )
+```
+
+- Assumptions:
+  - Normality test with Q-Q plot showed the data is not normally distributed, however since both smoking groups had sample sizes > 30, T-test still remains valid under Central Limit Theorem
+  - Homogeneity of variance test showed uneual variances as the p-value < 0.05
+    - Instead of conducting the standard T-test, we will have to conduct the Welch two-sample T-test instead
+
+# Hypothesis Testing (between Medical Insurance Charges and Smoking)
+
+```{r}
+t.test(
+  charges ~ smoker, data = df,
+  var.equal = FALSE, mu = 0, alternative = "two.sided"
+)
+```
+
+- Welch T-test showed p-value = 2.2e-16, which is less than significance level. Reject null hypothesis, indicating there is a statistically significant difference in mean medical insurance charges between smokers and non-smokers
+- Smokers incur significantly higher medical insurance charges than non-smokers, suggesting that smoking might have an association with increased medical costs
+
+# Hypothesis Testing (between Medical Insurance Charges and Sex)
+
+- Independent two-sample T-test analysis if medical insurance charges differs between sex
+- Identify if the different sex is associated with higher medical insurance costs
+- H0: Mean medical insurance charges are equal for all sexes
+- HA: Mean medical insurance charges differ between sexes
+- Significance level: alpha = 0.05
+
+
+```{r echo = FALSE, fig.cap = "Fig 7. Distribution of Medical Insurance Charges by Sex", fig.width = 6, fig.height = 2}
+cat_charges_graphs(df, "sex", sex_color_code, "Sex")
+```
+
+- Not much visible difference, however the Q1-Q3 range for medical insurance charges is larger for Male than Female
+
+```{r include = FALSE}
+df_female <- df %>% filter(sex == "female")
+df_male <- df %>% filter(sex == "male")
+```
+
+# Hypothesis Testing (between Medical Insurance Charges and Sex)
+
+```{r echo = FALSE, fig.cap = "Fig 8. Normality Test with QQ Plot for Medical Insurance Charges by Sex", fig.width = 6, fig.height = 2}
+(norm_test(df_female, "charges", title ="Female") + 
+    plot_spacer() + 
+    norm_test(df_male, "charges", title = "Male")) +
+  plot_annotation(
+    title = "QQ Plot of Medical insurance charges",
+    theme = theme(plot.title = element_text(hjust = .5))
+  ) +
+  plot_layout(widths = c(1, .05, 1))
+```
+
+```{r echo = FALSE, tab.cap = "Table 6. Homogeneity of Variance Test for Medical Insurance Charges by Sex"}
+kable(leveneTest(charges ~ sex, data = df), digits = 100) %>%
+  kable_styling(
+    full_width = TRUE, 
+    font_size = 16
+  )
+```
+
+- Assumptions:
+  - Normality test with Q-Q plot showed the data is not normally distributed, however since both sexes had sample sizes > 30, T-test still remains valid under Central Limit Theorem
+  - Homogeneity of variance test showed uneual variances as the p-value < 0.05
+    - Instead of conducting the standard T-test, we will have to conduct the Welch two-sample T-test instead
+    
+# Hypothesis Testing (between Medical Insurance Charges and Sex)
+
+```{r}
+t.test(
+  charges ~ sex, data = df,
+  var.equal = FALSE, mu = 0, alternative = "two.sided"
+)
+```
+
+- Welch T-test showed p-value = 0.03584, which is less than significance level. Reject null hypothesis, indicating there is a statistically significant difference in mean medical insurance charges between sexes
+- Males incur significantly higher medical insurance charges than Females, although this difference might be partly explained through other factors such as the higher proportion of smokers for males.
+
+# Discussion
+
+- Findings:
+  - Dataset is unbiased in terms of data collected between sex and region
+  - Significant association was found between sex and smoking status, where males are more likely to smoke than females
+  - Smokers had significantly higher medical insurance charges than non-smokers
+  - While on average that males also had a higher medical insurance charge than females, it can be due to the difference explained between the higher proportion of smokers among males
+- Strengths and Limitations:
+  - Combined categorical association and hypothesis testing to investigate a couple of perspectives on how factors relate to medical insurance charges
+  - Hypothesis stated and assumption checks are always performed before conducting statistical tests
+  - Results are also supported with statistical analysis and graphical visualisations
+  - However, only selected features were analysed, while other factors (e.g. age and BMI) where not considered
+  - Regression analysis not conducted, lose information such as having a combination of multiple features that significantly affect medical insurance charges
+  
+# Conclusion
+
+- Regardless of region, smoking appears to play a big role in explaning the difference in medical insurance charges, with more smokers being males than females
+- Smoking behaviour could be a key factor in higher medical costs, highlighting the importance of how lifestyle choices can influence in medical expenses and insurance outcomes
+- Health organisations can explore ways and interventions to help reduce smoking among both males and females, which may help reduce overall medical insurance charges
+
+- Further Investigation:
+  - Perform multiple regression analysis to determine if smoking status is still a significant feature affecting charges, or a combination of other features (inclusive/exclusive of smoking status)
+  - Investigate more features on the individual's demographic and lifestyle choices
+
+# References
+
+1. Mosap Abdel-Ghany. (2025). Medical Insurance Cost Dataset. Kaggle. https://www.kaggle.com/datasets/mosapabdelghany/medical-insurance-cost-dataset
+2. Hansjörg Neth. (2026). D.3 Basic R colors https://bookdown.org/hneth/ds4psy/D.3-apx-colors-basics.html
+3. Yihui Xie, J.J. Allaire, Garrett Grolemund. (2026). 4.2 Slidy presentation. https://pkg.yihui.org/rmarkdown-book/slidy-presentation
